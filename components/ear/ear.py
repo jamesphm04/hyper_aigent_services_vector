@@ -4,6 +4,12 @@ from concurrent import futures
 import sys
 import numpy as np 
 import warnings
+import requests
+import time
+import serial
+
+
+warnings.filterwarnings("ignore")
 
 # Redirect stderr to /dev/null
 devnull = os.open(os.devnull, os.O_WRONLY)
@@ -13,34 +19,71 @@ os.dup2(devnull, 2)
 os.close(devnull)
 
 API_KEY = os.getenv("OPENAI_API_KEY")
+legs = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
+legs.flush()
 
 class Ear:
-    def __init__(self):
+    def __init__(self, process_internal=20):
         self.rec = sr.Recognizer()
         self.mic = sr.Microphone()
 
         self.pool = futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="Rec Thread")
         self.speech = []
+        self.last_process_time = 0
+        self.process_interval = process_internal  # 20 seconds interval
 
     def grab_audio(self) -> sr.AudioData:
         print("Listening...")
         with self.mic as source:
             audio = self.rec.listen(source, phrase_time_limit=2)
-
         return audio
 
-    def is_speech(self, audio_data: sr.AudioData, threshold=0.01):
-        data = np.frombuffer(audio_data.frame_data, dtype=np.int16) #converting from audio data(bytes) to np array
+    def is_speech(self, audio_data: sr.AudioData, threshold=0.5):
+        data = np.frombuffer(audio_data.frame_data, dtype=np.int16)
         energy = np.sum(data.astype(float)**2)/len(data)
         return energy > threshold
 
     def recognize_audio_thread_pool(self, audio_data: sr.AudioData):
-        future = self.pool.submit(self.get_text, audio_data)
-        future.add_done_callback(self.post_process_callback)
+        current_time = time.time()
+        if current_time - self.last_process_time >= self.process_interval:
+            self.last_process_time = current_time
+            future = self.pool.submit(self.get_text, audio_data)
+            future.add_done_callback(self.post_process_callback)
+        else:
+            print(f"Skipping processing. {self.process_interval - (current_time - self.last_process_time):.1f} seconds until next process.")
 
     def post_process_callback(self, future):
-        result = future.result()
-        print(f"Recognized: {result}")
+        result = future.result().lower()
+        print(f"***********Recognized: {result}")
+
+        if "forward" in result:
+            self.send_command("U")
+        elif "backward" in result:
+            self.send_command("D")
+        elif "left" in result:
+            self.send_command("L")
+        elif "right" in result:
+            self.send_command("R")
+
+
+        # self.get_command(result)
+
+    def send_command(self, command: str):
+        if command in ['U', 'D', 'L', 'R']:
+            legs.write(command.encode())
+        else:
+            print("Invalid command. Please use 'U', 'D', 'L', 'R'")
+
+
+    def get_command(self, command: str):
+        url = "http://localhost:5002/vector/voice_command"
+        payload = {"voice_message": command}
+        try:
+            response = requests.post(url, json=payload)
+            response.raise_for_status()
+            print(response.json())
+        except requests.exceptions.RequestException as e:
+            print(f"Error: {e}")
 
     def get_text(self, audio: sr.AudioData) -> str:
         print("Waiting for text from whisper-1...")

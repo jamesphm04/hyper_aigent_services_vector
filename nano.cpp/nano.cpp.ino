@@ -15,20 +15,28 @@ void setup() {
 void moveUp() {
   leftServo.write(100);
   rightServo.write(80);
+  delay(2000);
+  dontMove();
   }
 
 void moveDown() {
   leftServo.write(80);
   rightServo.write(100);
+  delay(2000);
+  dontMove();
 }
 
 
 void moveLeft() {
   rightServo.write(80);
+  delay(1000);
+  dontMove();
 }
 
 void moveRight() {
   leftServo.write(100);
+  delay(1000);
+  dontMove();
 }
 
 void dontMove() {
@@ -47,8 +55,6 @@ void loop() {
       moveLeft();
     } else if (command == 'R') {  // "Right" arror command
       moveRight();
-    } else if (command == 'S') {  // "Stop" command
-      dontMove();
     }
   }
 }
